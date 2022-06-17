@@ -185,4 +185,4 @@ fabric.properties
 # .idea
 
 # Others
-.zip
+*.zip
