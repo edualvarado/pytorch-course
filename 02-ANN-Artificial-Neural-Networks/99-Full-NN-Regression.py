@@ -53,6 +53,8 @@ df['Weekday'] = df['EDTdate'].dt.strftime("%a")
 cat_cols = ['Hour', 'AMorPM', 'Weekday']
 cont_cols = ['pickup_longitude', 'pickup_latitude', 'dropoff_longitude', 'dropoff_latitude', 'passenger_count', 'dist_km']
 y_col = ['fare_amount']
+y_col = ['fare_class']  # For Classification
+
 # print(df.dtypes)
 
 # 4. Convert to category, that is from categorical to numerical code
@@ -79,8 +81,8 @@ conts = np.stack([df[col].values for col in cont_cols], axis=1)
 conts = torch.tensor(conts, dtype=torch.float32)
 
 # 7. Stack label values into one tensor
-y = [df[col].values for col in y_col]
-y = torch.tensor(np.array(y), dtype=torch.float).reshape(-1, 1)
+# y = torch.tensor(df[y_col].values, dtype=torch.float).reshape(-1,1)
+y = torch.tensor(df[y_col].values).flatten() # For Classification
 
 print(cats.shape)
 print(conts.shape)
@@ -176,5 +178,96 @@ class TabularModel(nn.Module):
         x = self.layers(x)
         return x
 
+
+torch.manual_seed(33)
+
+#model = TabularModel(emb_szs, conts.shape[1], 1, [256, 128], 0.4)
+model = TabularModel(emb_szs, conts.shape[1], 2, [256, 128], 0.4) # For classification
+# Output size = n° classes (2 binary)
+print(model)
+
+#criterion = nn.MSELoss() # np.sqrt(MSE) --> RMSE
+criterion = nn.CrossEntropyLoss() # For classification
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+batch_size = 60000
+test_size = int(batch_size*0.2)
+
+'''
+Batch Gradient Descent. Batch Size = Size of Training Set
+Stochastic Gradient Descent. Batch Size = 1
+Mini-Batch Gradient Descent. 1 < Batch Size < Size of Training Set
+'''
+
+# Data shuffled already
+cat_train = cats[:batch_size-test_size]
+cat_test = cats[batch_size-test_size:batch_size]
+
+cont_train = conts[:batch_size-test_size]
+cont_test = conts[batch_size-test_size:batch_size]
+
+y_train = y[:batch_size-test_size]
+y_test = y[batch_size-test_size:batch_size]
+
+# len(cat_train)
+# len(cat_test)
+
+print(cat_train.shape)
+print(cont_train.shape)
+print(cat_test.shape)
+print(cont_test.shape)
+
+import time
+start_time = time.time()
+
+epochs = 300
+losses = []
+
+for i in range(epochs):
+    i += 1
+    y_pred = model(cat_train, cont_train)
+    loss = torch.sqrt(criterion(y_pred, y_train)) # RMSE
+    losses.append(loss)
+
+    if(i % 5 == 0):
+        print(f'Epoch {i} | Loss: {loss}')
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+duration = time.time() - start_time
+print(f'Duration: {duration/60} minutes')
+# In laptop: 1.01 minutes
+
+# New list of losses deatached from the graph
+losses = [loss.detach().numpy() for loss in losses]
+plt.plot(range(epochs), losses)
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.show()
+
+with torch.no_grad():
+    y_val = model(cat_test, cont_test)
+    # loss = torch.sqrt(criterion(y_val, y_test))
+    # print(f'Validation Loss: {loss}')
+    loss = criterion(y_val, y_test) # For Classification
+    print(f'CE Loss: {loss}')
+
+# for i in range(10):
+#     print(f'Prediction: {y_val[i].item():8.2f} | Actual: {y_test[i].item():8.2f}')
+
+# For Classification
+rows = 50
+correct = 0
+print(f'{"MODEL OUTPUT":26} ARGMAX  Y_TEST')
+for i in range(rows):
+    print(f'{str(y_val[i]):26} {y_val[i].argmax():^7}{y_test[i]:^7}')
+    if y_val[i].argmax().item() == y_test[i]:
+        correct += 1
+print(f'\n{correct} out of {rows} = {100*correct/rows:.2f}% correct')
+
+#torch.save(model.state_dict(), 'MyTaxiModel.pt')
+torch.save(model.state_dict(), 'MyTaxiModelClassification.pt') # For Classification
 
 print("Done")
